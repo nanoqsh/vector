@@ -1,6 +1,9 @@
 mod vert;
 
-use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture};
+use {
+    crate::vert::ImageVert,
+    glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture},
+};
 
 fn main() {
     use glutin::{
@@ -32,31 +35,112 @@ fn main() {
         gl.enable(glow::MULTISAMPLE);
     }
 
-    let main_program = {
-        let (vertex_shader_src, fragment_shader_src) = (
-            r#"
-                layout (location = 0) in vec2 pos;
-                uniform mat2 mat;
-                uniform vec2 transform;
-                void main() {
-                    vec2 p = mat * (transform + pos);
-                    gl_Position = vec4(p, 0.0, 1.0);
-                }
-            "#,
-            r#"
-                precision mediump float;
-                out vec4 color;
-                void main() {
-                    color = vec4(0.8, 0.5, 0.7, 1.0);
-                }
-            "#,
+    let (nanachi, nanachi_size) = unsafe {
+        let im = image::load_from_memory(include_bytes!("nanachi.jpg")).expect("read image");
+        let im = im.as_rgb8().expect("rgb8");
+
+        let texture = gl.create_texture().expect("create texture");
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGB as i32,
+            im.width() as i32,
+            im.height() as i32,
+            0,
+            glow::RGB,
+            glow::UNSIGNED_BYTE,
+            Some(im.as_ref()),
         );
 
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR as i32,
+        );
+
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+
+        (texture, im.dimensions())
+    };
+
+    let nw = nanachi_size.0 as f32 * 0.2;
+    let nh = nanachi_size.1 as f32 * 0.2;
+    let image_verts = [
+        ImageVert {
+            pos: [-nw, -nh],
+            tex: [0., 1.],
+        },
+        ImageVert {
+            pos: [-nw, nh],
+            tex: [0., 0.],
+        },
+        ImageVert {
+            pos: [nw, -nh],
+            tex: [1., 1.],
+        },
+        ImageVert {
+            pos: [nw, nh],
+            tex: [1., 0.],
+        },
+    ];
+
+    let image_vertex_array = unsafe {
+        use std::{mem, slice};
+
+        let vertex_array = gl.create_vertex_array().expect("create a vertex array");
+        gl.bind_vertex_array(Some(vertex_array));
+
+        let array_buffer = gl.create_buffer().expect("create buffer");
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(array_buffer));
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            slice::from_raw_parts(
+                image_verts.as_ptr().cast(),
+                image_verts.len() * mem::size_of_val(&image_verts[0]),
+            ),
+            glow::STATIC_DRAW,
+        );
+
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(
+            0,
+            2,
+            glow::FLOAT,
+            false,
+            mem::size_of_val(&image_verts[0])
+                .try_into()
+                .expect("convert"),
+            0,
+        );
+
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(
+            1,
+            2,
+            glow::FLOAT,
+            false,
+            mem::size_of_val(&image_verts[0])
+                .try_into()
+                .expect("convert"),
+            mem::size_of::<[f32; 2]>() as i32,
+        );
+
+        gl.bind_vertex_array(None);
+        vertex_array
+    };
+
+    let main_program = {
         let program = create_shader_program(
             &gl,
             [
-                (glow::VERTEX_SHADER, vertex_shader_src),
-                (glow::FRAGMENT_SHADER, fragment_shader_src),
+                (glow::VERTEX_SHADER, include_str!("shaders/main_vs.glsl")),
+                (glow::FRAGMENT_SHADER, include_str!("shaders/main_fs.glsl")),
             ],
         );
 
@@ -80,45 +164,56 @@ fn main() {
         program
     };
 
-    let screen_uniform_sample = 0;
-    let post_program = {
-        let (vertex_shader_src, fragment_shader_src) = (
-            r#"
-                const vec2 verts[4] = vec2[4](
-                    vec2(0.0, 0.0),
-                    vec2(0.0, 1.0),
-                    vec2(1.0, 0.0),
-                    vec2(1.0, 1.0)
-                );
-                out vec2 uv;
-                void main() {
-                    uv = verts[gl_VertexID];
-                    gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
-                }
-            "#,
-            r#"
-                precision mediump float;
-                uniform sampler2D screen;
-                in vec2 uv;
-                out vec4 color;
-                void main() {
-                    color = texture(screen, uv);
-                }
-            "#,
-        );
-
+    let image_uniform_sample = 0;
+    let image_program = {
         let program = create_shader_program(
             &gl,
             [
-                (glow::VERTEX_SHADER, vertex_shader_src),
-                (glow::FRAGMENT_SHADER, fragment_shader_src),
+                (glow::VERTEX_SHADER, include_str!("shaders/image_vs.glsl")),
+                (glow::FRAGMENT_SHADER, include_str!("shaders/image_fs.glsl")),
             ],
         );
 
         unsafe {
             gl.use_program(Some(program));
             let loc = gl
-                .get_uniform_location(program, "screen")
+                .get_uniform_location(program, "mat")
+                .expect("uniform location");
+
+            let value: [f32; 4] = [1., 0., 0., 1.];
+            gl.uniform_matrix_2_f32_slice(Some(&loc), false, &value);
+
+            let loc = gl
+                .get_uniform_location(program, "transform")
+                .expect("uniform location");
+
+            let [x, y]: [f32; 2] = [0., 0.];
+            gl.uniform_2_f32(Some(&loc), x, y);
+
+            let loc = gl
+                .get_uniform_location(program, "image")
+                .expect("uniform location");
+
+            gl.uniform_1_i32(Some(&loc), image_uniform_sample);
+        }
+
+        program
+    };
+
+    let screen_uniform_sample = 0;
+    let post_program = {
+        let program = create_shader_program(
+            &gl,
+            [
+                (glow::VERTEX_SHADER, include_str!("shaders/post_vs.glsl")),
+                (glow::FRAGMENT_SHADER, include_str!("shaders/image_fs.glsl")),
+            ],
+        );
+
+        unsafe {
+            gl.use_program(Some(program));
+            let loc = gl
+                .get_uniform_location(program, "image")
                 .expect("uniform location");
 
             gl.uniform_1_i32(Some(&loc), screen_uniform_sample);
@@ -162,6 +257,13 @@ fn main() {
     let mut screen_size = (500, 500);
     let mut frame = Frame::new(&gl, screen_size);
 
+    let post_vertex_array = unsafe { gl.create_vertex_array().expect("create vertex array") };
+
+    unsafe {
+        gl.viewport(0, 0, screen_size.0 as i32, screen_size.1 as i32);
+        gl.clear_color(0.2, 0.15, 0.4, 1.);
+    }
+
     if cfg!(debug_assertions) {
         unsafe {
             let err = gl.get_error();
@@ -174,13 +276,6 @@ fn main() {
         }
     }
 
-    let post_vertex_array = unsafe { gl.create_vertex_array().expect("create vertex array") };
-
-    unsafe {
-        gl.viewport(0, 0, screen_size.0 as i32, screen_size.1 as i32);
-        gl.clear_color(0.2, 0.15, 0.4, 1.);
-    }
-
     el.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -190,11 +285,17 @@ fn main() {
             Event::RedrawRequested(_) => unsafe {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(frame.framebuffer));
 
-                // Draw an object
+                // Draw objects
                 gl.clear(glow::COLOR_BUFFER_BIT);
                 gl.use_program(Some(main_program));
                 gl.bind_vertex_array(Some(vertex_array));
                 gl.draw_arrays(glow::TRIANGLE_FAN, 0, verts.len() as i32);
+
+                gl.use_program(Some(image_program));
+                gl.bind_texture(glow::TEXTURE_2D, Some(nanachi));
+                gl.active_texture(image_uniform_sample as u32);
+                gl.bind_vertex_array(Some(image_vertex_array));
+                gl.draw_arrays(glow::TRIANGLE_STRIP, 0, image_verts.len() as i32);
 
                 // Blit multisampled buffer
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(frame.framebuffer));
@@ -236,15 +337,18 @@ fn main() {
                     frame = Frame::new(&gl, screen_size);
 
                     unsafe {
-                        gl.use_program(Some(main_program));
-                        let loc = gl
-                            .get_uniform_location(main_program, "mat")
-                            .expect("uniform location");
-
                         let w = 2. / screen_size.0 as f32;
                         let h = 2. / screen_size.1 as f32;
                         let value: [f32; 4] = [w, 0., 0., h];
-                        gl.uniform_matrix_2_f32_slice(Some(&loc), false, &value);
+
+                        for program in [main_program, image_program] {
+                            gl.use_program(Some(program));
+                            let loc = gl
+                                .get_uniform_location(program, "mat")
+                                .expect("uniform location");
+
+                            gl.uniform_matrix_2_f32_slice(Some(&loc), false, &value);
+                        }
                     }
                 }
                 WindowEvent::KeyboardInput {

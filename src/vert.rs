@@ -1,5 +1,13 @@
 #[repr(C)]
-pub struct Vert([f32; 2]);
+pub struct Vert {
+    pub pos: [f32; 2],
+}
+
+#[repr(C)]
+pub struct ImageVert {
+    pub pos: [f32; 2],
+    pub tex: [f32; 2],
+}
 
 pub fn make_ellipse(rx: f32, ry: f32) -> Vec<Vert> {
     use std::f32::consts::TAU;
@@ -26,7 +34,9 @@ pub fn make_ellipse(rx: f32, ry: f32) -> Vec<Vert> {
             let y = psin * scos + pcos * ssin;
             pcos = x;
             psin = y;
-            Vert([x * rx, y * ry])
+            Vert {
+                pos: [x * rx, y * ry],
+            }
         })
         .collect()
 }

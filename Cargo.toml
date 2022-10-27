@@ -1,0 +1,8 @@
+[package]
+name = "vector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glow = "0.11"
+glutin = { version = "0.29", default-features = false, features = ["wayland"] }

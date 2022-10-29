@@ -13,7 +13,7 @@ pub fn make_ellipse(rx: f32, ry: f32) -> Vec<Vert> {
     use std::f32::consts::TAU;
 
     const MIN_SEGMENTS: u32 = 16;
-    const SEGMENT_LEN: f32 = 6.;
+    const SEGMENT_LEN: f32 = 7.;
 
     // Calculate the approximate number of points.
     // The circumference of an ellipse is quite complex,

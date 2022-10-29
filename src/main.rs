@@ -2,7 +2,9 @@ mod vert;
 
 use {
     crate::vert::ImageVert,
-    glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture},
+    glow::{
+        Context, HasContext, NativeFramebuffer, NativeProgram, NativeRenderbuffer, NativeTexture,
+    },
 };
 
 fn main() {
@@ -187,7 +189,7 @@ fn main() {
                 .get_uniform_location(program, "transform")
                 .expect("uniform location");
 
-            let [x, y]: [f32; 2] = [0., 0.];
+            let [x, y]: [f32; 2] = [0., -50.];
             gl.uniform_2_f32(Some(&loc), x, y);
 
             let loc = gl
@@ -222,7 +224,7 @@ fn main() {
         program
     };
 
-    let verts = vert::make_ellipse(40., 40.);
+    let verts = vert::make_ellipse(240., 240.);
     let vertex_array = unsafe {
         use std::{mem, slice};
 
@@ -262,18 +264,8 @@ fn main() {
     unsafe {
         gl.viewport(0, 0, screen_size.0 as i32, screen_size.1 as i32);
         gl.clear_color(0.2, 0.15, 0.4, 1.);
-    }
-
-    if cfg!(debug_assertions) {
-        unsafe {
-            let err = gl.get_error();
-            if err != glow::NO_ERROR {
-                let errors = gl.get_debug_message_log(100);
-                for err in errors {
-                    eprintln!("{err:?}");
-                }
-            }
-        }
+        gl.clear_stencil(0);
+        gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
     }
 
     el.run(move |event, _, flow| {
@@ -283,17 +275,33 @@ fn main() {
                 window.window().request_redraw();
             }
             Event::RedrawRequested(_) => unsafe {
+                if cfg!(debug_assertions) {
+                    let err = gl.get_error();
+                    if err != glow::NO_ERROR {
+                        let errors = gl.get_debug_message_log(100);
+                        for err in errors {
+                            eprintln!("{err:?}");
+                        }
+                    }
+                }
+
                 gl.bind_framebuffer(glow::FRAMEBUFFER, Some(frame.framebuffer));
 
                 // Draw objects
-                gl.clear(glow::COLOR_BUFFER_BIT);
+                gl.stencil_mask(0xff);
+                gl.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+                gl.enable(glow::STENCIL_TEST);
+                gl.stencil_func(glow::ALWAYS, 1, 0xff);
+                // gl.stencil_mask(0xff);
                 gl.use_program(Some(main_program));
                 gl.bind_vertex_array(Some(vertex_array));
                 gl.draw_arrays(glow::TRIANGLE_FAN, 0, verts.len() as i32);
 
+                gl.stencil_func(glow::EQUAL, 1, 0xff);
+                gl.stencil_mask(0x00);
                 gl.use_program(Some(image_program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(nanachi));
-                gl.active_texture(image_uniform_sample as u32);
+                gl.active_texture(glow::TEXTURE0 + image_uniform_sample as u32);
                 gl.bind_vertex_array(Some(image_vertex_array));
                 gl.draw_arrays(glow::TRIANGLE_STRIP, 0, image_verts.len() as i32);
 
@@ -315,9 +323,10 @@ fn main() {
 
                 // Draw frame
                 gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                gl.disable(glow::STENCIL_TEST);
                 gl.use_program(Some(post_program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(frame.screen));
-                gl.active_texture(screen_uniform_sample as u32);
+                gl.active_texture(glow::TEXTURE0 + screen_uniform_sample as u32);
                 gl.bind_vertex_array(Some(post_vertex_array));
                 gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
 
@@ -325,8 +334,6 @@ fn main() {
             },
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::Resized(size) => {
-                    window.resize(size);
-
                     screen_size = size.into();
 
                     unsafe {
@@ -350,6 +357,8 @@ fn main() {
                             gl.uniform_matrix_2_f32_slice(Some(&loc), false, &value);
                         }
                     }
+
+                    window.resize(size);
                 }
                 WindowEvent::KeyboardInput {
                     input:
@@ -402,6 +411,7 @@ struct Frame {
     framebuffer: NativeFramebuffer,
     intermediate: NativeFramebuffer,
     color_buffer: NativeTexture,
+    renderbuffer: NativeRenderbuffer,
     screen: NativeTexture,
 }
 
@@ -430,6 +440,23 @@ impl Frame {
                 glow::TEXTURE_2D_MULTISAMPLE,
                 Some(color_buffer),
                 0,
+            );
+
+            let renderbuffer = gl.create_renderbuffer().expect("create renderbuffer");
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
+            gl.renderbuffer_storage_multisample(
+                glow::RENDERBUFFER,
+                SAMPLES as i32,
+                glow::DEPTH24_STENCIL8,
+                width as i32,
+                height as i32,
+            );
+
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(renderbuffer),
             );
 
             if cfg!(debug_assertions)
@@ -485,6 +512,7 @@ impl Frame {
                 framebuffer,
                 intermediate,
                 color_buffer,
+                renderbuffer,
                 screen,
             }
         }
@@ -495,6 +523,7 @@ impl Frame {
             gl.delete_framebuffer(self.framebuffer);
             gl.delete_framebuffer(self.intermediate);
             gl.delete_texture(self.color_buffer);
+            gl.delete_renderbuffer(self.renderbuffer);
             gl.delete_texture(self.screen);
         }
     }

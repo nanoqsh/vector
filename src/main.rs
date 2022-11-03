@@ -29,7 +29,7 @@ fn main() {
             .make_current()
             .expect("creation of window context");
 
-        let gl = Context::from_loader_function(|s| window.get_proc_address(s) as *const _);
+        let gl = Context::from_loader_function(|s| window.get_proc_address(s).cast());
         (el, window, gl)
     };
 
@@ -47,9 +47,9 @@ fn main() {
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
-            glow::RGB as i32,
-            im.width() as i32,
-            im.height() as i32,
+            glow::RGB.try_into().expect("cast"),
+            im.width().try_into().expect("cast"),
+            im.height().try_into().expect("cast"),
             0,
             glow::RGB,
             glow::UNSIGNED_BYTE,
@@ -59,13 +59,13 @@ fn main() {
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
+            glow::LINEAR.try_into().expect("cast"),
         );
 
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
+            glow::LINEAR.try_into().expect("cast"),
         );
 
         (texture, im.dimensions())
@@ -130,7 +130,7 @@ fn main() {
             mem::size_of_val(&image_verts[0])
                 .try_into()
                 .expect("convert"),
-            mem::size_of::<[f32; 2]>() as i32,
+            mem::size_of::<[f32; 2]>().try_into().expect("cast"),
         );
 
         gl.bind_vertex_array(None);
@@ -262,7 +262,12 @@ fn main() {
     let post_vertex_array = unsafe { gl.create_vertex_array().expect("create vertex array") };
 
     unsafe {
-        gl.viewport(0, 0, screen_size.0 as i32, screen_size.1 as i32);
+        gl.viewport(
+            0,
+            0,
+            screen_size.0.try_into().expect("cast"),
+            screen_size.1.try_into().expect("cast"),
+        );
         gl.clear_color(0.2, 0.15, 0.4, 1.);
         gl.clear_stencil(0);
         gl.stencil_op(glow::KEEP, glow::KEEP, glow::REPLACE);
@@ -295,15 +300,21 @@ fn main() {
                 // gl.stencil_mask(0xff);
                 gl.use_program(Some(main_program));
                 gl.bind_vertex_array(Some(vertex_array));
-                gl.draw_arrays(glow::TRIANGLE_FAN, 0, verts.len() as i32);
+                gl.draw_arrays(glow::TRIANGLE_FAN, 0, verts.len().try_into().expect("cast"));
 
                 gl.stencil_func(glow::EQUAL, 1, 0xff);
                 gl.stencil_mask(0x00);
                 gl.use_program(Some(image_program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(nanachi));
-                gl.active_texture(glow::TEXTURE0 + image_uniform_sample as u32);
+                gl.active_texture(
+                    glow::TEXTURE0 + u32::try_from(image_uniform_sample).expect("cast"),
+                );
                 gl.bind_vertex_array(Some(image_vertex_array));
-                gl.draw_arrays(glow::TRIANGLE_STRIP, 0, image_verts.len() as i32);
+                gl.draw_arrays(
+                    glow::TRIANGLE_STRIP,
+                    0,
+                    image_verts.len().try_into().expect("cast"),
+                );
 
                 // Blit multisampled buffer
                 gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(frame.framebuffer));
@@ -311,12 +322,12 @@ fn main() {
                 gl.blit_framebuffer(
                     0,
                     0,
-                    screen_size.0 as i32,
-                    screen_size.1 as i32,
+                    screen_size.0.try_into().expect("cast"),
+                    screen_size.1.try_into().expect("cast"),
                     0,
                     0,
-                    screen_size.0 as i32,
-                    screen_size.1 as i32,
+                    screen_size.0.try_into().expect("cast"),
+                    screen_size.1.try_into().expect("cast"),
                     glow::COLOR_BUFFER_BIT,
                     glow::NEAREST,
                 );
@@ -326,7 +337,9 @@ fn main() {
                 gl.disable(glow::STENCIL_TEST);
                 gl.use_program(Some(post_program));
                 gl.bind_texture(glow::TEXTURE_2D, Some(frame.screen));
-                gl.active_texture(glow::TEXTURE0 + screen_uniform_sample as u32);
+                gl.active_texture(
+                    glow::TEXTURE0 + u32::try_from(screen_uniform_sample).expect("cast"),
+                );
                 gl.bind_vertex_array(Some(post_vertex_array));
                 gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
 
@@ -337,7 +350,12 @@ fn main() {
                     screen_size = size.into();
 
                     unsafe {
-                        gl.viewport(0, 0, screen_size.0 as i32, screen_size.1 as i32);
+                        gl.viewport(
+                            0,
+                            0,
+                            screen_size.0.try_into().expect("cast"),
+                            screen_size.1.try_into().expect("cast"),
+                        );
                     }
 
                     frame.delete(&gl);
@@ -427,10 +445,10 @@ impl Frame {
             gl.bind_texture(glow::TEXTURE_2D_MULTISAMPLE, Some(color_buffer));
             gl.tex_image_2d_multisample(
                 glow::TEXTURE_2D_MULTISAMPLE,
-                SAMPLES as i32,
-                glow::RGB as i32,
-                width as i32,
-                height as i32,
+                SAMPLES.into(),
+                glow::RGB.try_into().expect("cast"),
+                width.try_into().expect("cast"),
+                height.try_into().expect("cast"),
                 true,
             );
 
@@ -446,10 +464,10 @@ impl Frame {
             gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
             gl.renderbuffer_storage_multisample(
                 glow::RENDERBUFFER,
-                SAMPLES as i32,
+                SAMPLES.into(),
                 glow::DEPTH24_STENCIL8,
-                width as i32,
-                height as i32,
+                width.try_into().expect("cast"),
+                height.try_into().expect("cast"),
             );
 
             gl.framebuffer_renderbuffer(
@@ -473,9 +491,9 @@ impl Frame {
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGB as i32,
-                width as i32,
-                height as i32,
+                glow::RGB.try_into().expect("cast"),
+                width.try_into().expect("cast"),
+                height.try_into().expect("cast"),
                 0,
                 glow::RGB,
                 glow::UNSIGNED_BYTE,
@@ -485,13 +503,13 @@ impl Frame {
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MIN_FILTER,
-                glow::NEAREST as i32,
+                glow::NEAREST.try_into().expect("cast"),
             );
 
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MAG_FILTER,
-                glow::NEAREST as i32,
+                glow::NEAREST.try_into().expect("cast"),
             );
 
             gl.framebuffer_texture_2d(
